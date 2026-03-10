@@ -10,6 +10,14 @@ const userSchema = new mongoose.Schema(
       minlength: [2, "الاسم يجب أن يكون حرفين على الأقل"],
       maxlength: [50, "الاسم يجب ألا يتجاوز 50 حرف"],
     },
+    username: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+      lowercase: true,
+      match: [/^[a-zA-Z0-9_]+$/, "اسم المستخدم يجب أن يحتوي على أحرف إنجليزية وأرقام فقط"],
+    },
     email: {
       type: String,
       required: [true, "البريد الإلكتروني مطلوب"],
@@ -31,6 +39,30 @@ const userSchema = new mongoose.Schema(
       },
       default: "student",
     },
+    avatar: {
+      skinColor: { type: String, default: "#ffdbac" },
+      hairStyle: { type: String, default: "short" },
+      hairColor: { type: String, default: "#2c1b18" },
+      eyeColor: { type: String, default: "#634e34" },
+      outfit: { type: String, default: "casual" },
+      outfitColor: { type: String, default: "#6c5ce7" },
+    },
+    points: {
+      type: Number,
+      default: 0,
+    },
+    level: {
+      type: Number,
+      default: 1,
+    },
+    streak: {
+      type: Number,
+      default: 0,
+    },
+    lastActiveDate: {
+      type: Date,
+      default: null,
+    },
     enrolledCourses: [
       {
         course: {
@@ -49,6 +81,10 @@ const userSchema = new mongoose.Schema(
         },
       },
     ],
+    roadmapProgress: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
     isActive: {
       type: Boolean,
       default: true,

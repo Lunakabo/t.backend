@@ -1,6 +1,7 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const User = require("../../../models/User");
+const QuizAttempt = require("../../../models/QuizAttempt");
 const auth = require("../../../middleware/auth");
 
 const router = express.Router({ mergeParams: true });
@@ -8,7 +9,7 @@ const router = express.Router({ mergeParams: true });
 // ==================== POST /api/auth/register ====================
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, username, email, password, role } = req.body;
 
     // Validate required fields
     if (!name || !email || !password) {
@@ -27,10 +28,20 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    // Only allow admin creation by existing admins (default role is student)
+    // Check if username is taken
+    if (username) {
+      const existingUsername = await User.findOne({ username });
+      if (existingUsername) {
+        return res.status(400).json({
+          success: false,
+          message: "اسم المستخدم مسجل بالفعل",
+        });
+      }
+    }
+
+    // Only allow admin creation by existing admins
     let userRole = role || "student";
     if (userRole === "admin") {
-      // Check if there are any admins yet (first admin can self-register)
       const adminCount = await User.countDocuments({ role: "admin" });
       if (adminCount > 0) {
         return res.status(403).json({
@@ -43,6 +54,7 @@ router.post("/register", async (req, res) => {
     // Create user
     const user = await User.create({
       name,
+      username: username || email.split("@")[0],
       email,
       password,
       role: userRole,
@@ -55,13 +67,12 @@ router.post("/register", async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
     );
 
+    // Return flat format matching frontend expectations
     res.status(201).json({
       success: true,
       message: "تم إنشاء الحساب بنجاح",
-      data: {
-        user: user.toJSON(),
-        token,
-      },
+      token,
+      user: user.toJSON(),
     });
   } catch (error) {
     if (error.name === "ValidationError") {
@@ -69,6 +80,12 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({
         success: false,
         message: messages.join(", "),
+      });
+    }
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: "البريد الإلكتروني أو اسم المستخدم مسجل بالفعل",
       });
     }
     res.status(500).json({
@@ -91,7 +108,6 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // Find user with password
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({
@@ -107,7 +123,6 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // Check password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       return res.status(401).json({
@@ -116,20 +131,34 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // Generate JWT
+    // Update streak
+    const now = new Date();
+    const lastActive = user.lastActiveDate;
+    if (lastActive) {
+      const diffDays = Math.floor((now - lastActive) / (1000 * 60 * 60 * 24));
+      if (diffDays === 1) {
+        user.streak += 1;
+      } else if (diffDays > 1) {
+        user.streak = 1;
+      }
+    } else {
+      user.streak = 1;
+    }
+    user.lastActiveDate = now;
+    await user.save();
+
     const token = jwt.sign(
       { id: user._id, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
     );
 
+    // Return flat format matching frontend expectations
     res.status(200).json({
       success: true,
       message: "تم تسجيل الدخول بنجاح",
-      data: {
-        user: user.toJSON(),
-        token,
-      },
+      token,
+      user: user.toJSON(),
     });
   } catch (error) {
     res.status(500).json({
@@ -147,9 +176,32 @@ router.get("/me", auth, async (req, res) => {
       .select("-password")
       .populate("enrolledCourses.course", "title description");
 
+    // Get quiz stats
+    const totalAttempts = await QuizAttempt.countDocuments({ student: user._id });
+    const passedAttempts = await QuizAttempt.countDocuments({ student: user._id, passed: true });
+
+    const allAttempts = await QuizAttempt.find({ student: user._id });
+    let totalCorrect = 0;
+    let totalQuestions = 0;
+    allAttempts.forEach((a) => {
+      totalCorrect += a.correctAnswers;
+      totalQuestions += a.totalQuestions;
+    });
+
+    const averageAccuracy = totalQuestions > 0
+      ? Math.round((totalCorrect / totalQuestions) * 100)
+      : 0;
+
+    // Return flat format matching frontend expectations
     res.status(200).json({
       success: true,
-      data: { user },
+      user: user.toJSON(),
+      stats: {
+        totalAttempts,
+        passedAttempts,
+        totalPoints: user.points,
+        averageAccuracy,
+      },
     });
   } catch (error) {
     res.status(500).json({

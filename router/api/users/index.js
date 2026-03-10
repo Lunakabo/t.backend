@@ -5,12 +5,108 @@ const roleCheck = require("../../../middleware/roleCheck");
 
 const router = express.Router({ mergeParams: true });
 
-// All routes require auth + admin role
-router.use(auth);
-router.use(roleCheck("admin"));
+// ==================== PUT /api/users/profile ====================
+// Must come before /:id routes
+router.put("/profile", auth, async (req, res) => {
+  try {
+    const { name, username, email } = req.body;
+    const updateData = {};
 
-// ==================== GET /api/users ====================
-router.get("/", async (req, res) => {
+    if (name) updateData.name = name;
+    if (email) updateData.email = email;
+
+    if (username) {
+      // Check if username is taken by another user
+      const existing = await User.findOne({
+        username,
+        _id: { $ne: req.user._id },
+      });
+      if (existing) {
+        return res.status(400).json({
+          success: false,
+          message: "اسم المستخدم مسجل بالفعل",
+        });
+      }
+      updateData.username = username;
+    }
+
+    const user = await User.findByIdAndUpdate(req.user._id, updateData, {
+      new: true,
+      runValidators: true,
+    }).select("-password");
+
+    res.status(200).json({
+      success: true,
+      message: "تم تحديث الملف الشخصي بنجاح",
+      user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ في تحديث الملف الشخصي",
+      error: error.message,
+    });
+  }
+});
+
+// ==================== PUT /api/users/avatar ====================
+router.put("/avatar", auth, async (req, res) => {
+  try {
+    const { skinColor, hairStyle, hairColor, eyeColor, outfit, outfitColor } = req.body;
+    const avatarData = {};
+
+    if (skinColor) avatarData["avatar.skinColor"] = skinColor;
+    if (hairStyle) avatarData["avatar.hairStyle"] = hairStyle;
+    if (hairColor) avatarData["avatar.hairColor"] = hairColor;
+    if (eyeColor) avatarData["avatar.eyeColor"] = eyeColor;
+    if (outfit) avatarData["avatar.outfit"] = outfit;
+    if (outfitColor) avatarData["avatar.outfitColor"] = outfitColor;
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: avatarData },
+      { new: true }
+    ).select("-password");
+
+    // Update localStorage on frontend
+    res.status(200).json({
+      success: true,
+      message: "تم تحديث الشخصية بنجاح",
+      user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ في تحديث الشخصية",
+      error: error.message,
+    });
+  }
+});
+
+// ==================== GET /api/users/leaderboard ====================
+router.get("/leaderboard", auth, async (req, res) => {
+  try {
+    const users = await User.find({ isActive: true })
+      .select("name username avatar points level streak")
+      .sort({ points: -1 })
+      .limit(50);
+
+    res.status(200).json({
+      success: true,
+      data: users,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ في جلب الترتيب",
+      error: error.message,
+    });
+  }
+});
+
+// ==================== Admin routes ====================
+// GET /api/users (admin only)
+router.get("/", auth, roleCheck("admin"), async (req, res) => {
   try {
     const { role, page = 1, limit = 20 } = req.query;
     const query = {};
@@ -45,8 +141,8 @@ router.get("/", async (req, res) => {
   }
 });
 
-// ==================== GET /api/users/:id ====================
-router.get("/:id", async (req, res) => {
+// GET /api/users/:id
+router.get("/:id", auth, roleCheck("admin"), async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
       .select("-password")
@@ -72,8 +168,8 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// ==================== PUT /api/users/:id ====================
-router.put("/:id", async (req, res) => {
+// PUT /api/users/:id
+router.put("/:id", auth, roleCheck("admin"), async (req, res) => {
   try {
     const { name, email, role, isActive } = req.body;
     const updateData = {};
@@ -109,10 +205,9 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// ==================== DELETE /api/users/:id ====================
-router.delete("/:id", async (req, res) => {
+// DELETE /api/users/:id
+router.delete("/:id", auth, roleCheck("admin"), async (req, res) => {
   try {
-    // Prevent admin from deleting themselves
     if (req.params.id === req.user._id.toString()) {
       return res.status(400).json({
         success: false,

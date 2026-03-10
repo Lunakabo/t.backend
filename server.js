@@ -25,14 +25,16 @@ async function ConnectDB() {
 }
 ConnectDB();
 
-// CORS setup
-const corsOption = {
-  origin: "*",
+// CORS setup - allow all origins for development
+app.use(cors({
+  origin: true,
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-};
-app.use(cors(corsOption));
-app.options("*", cors(corsOption));
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+}));
+
+// Handle preflight requests explicitly
+app.options("*", cors());
 
 // Middleware
 app.use(bodyParser.json());
@@ -81,7 +83,7 @@ loadRoutes(path.join(__dirname, "router"), "/");
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: "المسار غير موجود",
+    message: `المسار غير موجود: ${req.method} ${req.originalUrl}`,
   });
 });
 
